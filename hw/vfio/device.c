@@ -605,6 +605,11 @@ static int vfio_device_io_region_write(VFIODevice *vbasedev, uint8_t index,
     return ret < 0 ? -errno : ret;
 }
 
+static ssize_t vfio_device_io_mig_data_read(VFIODevice *vbasedev, void *buf, size_t buf_size) {
+    VFIOMigration *migration = vbasedev->migration;
+    return read(migration->data_fd, buf, buf_size);
+}
+
 static int vfio_device_io_get_precopy_info(VFIODevice *vbasedev, struct vfio_precopy_info *info)
 {
     VFIOMigration *migration = vbasedev->migration;
@@ -623,5 +628,6 @@ static VFIODeviceIOOps vfio_device_io_ops_ioctl = {
     .set_irqs = vfio_device_io_set_irqs,
     .region_read = vfio_device_io_region_read,
     .region_write = vfio_device_io_region_write,
+    .mig_data_read = vfio_device_io_mig_data_read,
     .get_precopy_info = vfio_device_io_get_precopy_info,
 };

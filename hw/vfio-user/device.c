@@ -127,6 +127,58 @@ static int vfio_user_get_region_info(VFIOUserProxy *proxy,
     return 0;
 }
 
+
+static int vfio_user_device_io_device_reset(VFIODevice *vbasedev)
+{
+    VFIOUserProxy *proxy = vbasedev->proxy;
+    Error *local_err = NULL;
+    VFIOUserHdr hdr;
+
+    vfio_user_request_msg(&hdr, VFIO_USER_DEVICE_RESET, sizeof(hdr), 0);
+
+    if (!vfio_user_send_wait(proxy, &hdr, NULL, 0, &local_err)) {
+        error_prepend(&local_err, "%s: ", __func__);
+        error_report_err(local_err);
+        return -EFAULT;
+    }
+
+    if (hdr.flags & VFIO_USER_ERROR) {
+        return -hdr.error_reply;
+    }
+    return 0;
+}
+
+static int vfio_user_device_io_device_feature(VFIODevice *vbasedev,
+                                         struct vfio_device_feature *feature)
+{
+    uint32_t size;
+    VFIOUserProxy *proxy = vbasedev->proxy;
+    Error *local_err = NULL;
+    g_autofree VFIOUserDeviceFeature *msgp = NULL;
+
+    size = sizeof(VFIOUserHdr) + feature->argsz;
+    msgp = g_malloc0(size);
+
+    vfio_user_request_msg(&msgp->hdr, VFIO_USER_DEVICE_FEATURE, size, 0);
+
+    memcpy(&msgp->argsz, feature, feature->argsz);
+
+    if (!vfio_user_send_wait(proxy, &msgp->hdr, NULL, size, &local_err)) {
+        error_prepend(&local_err, "%s: ", __func__);
+        error_report_err(local_err);
+        return -EFAULT;
+    }
+    if (msgp->hdr.flags & VFIO_USER_ERROR) {
+        return -msgp->hdr.error_reply;
+    }
+
+    memcpy(feature, &msgp->argsz, msgp->argsz);
+
+    trace_vfio_user_device_feature(feature->flags, feature->argsz);
+
+    return 0;
+}
+
 static int vfio_user_device_io_get_region_info(VFIODevice *vbasedev,
                                                struct vfio_region_info *info,
                                                int *fd)
@@ -428,14 +480,73 @@ static int vfio_user_device_io_region_write(VFIODevice *vbasedev, uint8_t index,
     return ret;
 }
 
+static ssize_t vfio_user_device_io_mig_data_read(VFIODevice *vbasedev, void *buf, size_t buf_size)
+{
+    g_autofree VFIOUserMigData *msgp = NULL;
+    VFIOUserProxy *proxy = vbasedev->proxy;
+    Error *local_err = NULL;
+    uint32_t size;
+
+    size = sizeof(VFIOUserMigData) + buf_size;
+    msgp = g_malloc0(size);
+    vfio_user_request_msg(&msgp->hdr, VFIO_USER_MIG_DATA_READ, size, 0);
+    msgp->argsz = size - sizeof(VFIOUserHdr);
+    msgp->size = buf_size;
+
+    if (!vfio_user_send_wait(proxy, &msgp->hdr, NULL, 0, &local_err)) {
+        error_prepend(&local_err, "%s: ", __func__);
+        error_report_err(local_err);
+        return -EFAULT;
+    }
+    
+    if (msgp->hdr.flags & VFIO_USER_ERROR) {
+        return -msgp->hdr.error_reply;
+    }
+
+    memcpy(buf, msgp->data, msgp->size);
+
+    return msgp->size;
+}
+
+static int vfio_user_device_io_get_precopy_info(VFIODevice *vbasedev, struct vfio_precopy_info *info)
+{
+    VFIOUserProxy *proxy = vbasedev->proxy;
+    Error *local_err = NULL;
+    VFIOUserGetPrecopyInfo msg;
+
+    memset(&msg, 0, sizeof(msg));
+
+    vfio_user_request_msg(&msg.hdr, VFIO_USER_MIG_GET_PRECOPY_INFO, sizeof(msg), 0);
+
+    if (!vfio_user_send_wait(proxy, &msg.hdr, NULL, sizeof(msg), &local_err)) {
+        error_prepend(&local_err, "%s: ", __func__);
+        error_report_err(local_err);
+        return -EFAULT;
+    }
+
+    if (msg.hdr.flags & VFIO_USER_ERROR) {
+        return -msg.hdr.error_reply;
+    }
+
+    info->argsz = msg.argsz;
+    info->flags = msg.flags;
+    info->initial_bytes = msg.initial_bytes;
+    info->dirty_bytes = msg.dirty_bytes;
+
+    return 0;
+}
+
 /*
  * Socket-based io_ops
  */
 VFIODeviceIOOps vfio_user_device_io_ops_sock = {
+    .device_feature = vfio_user_device_io_device_feature,
+    .device_reset = vfio_user_device_io_device_reset,
     .get_region_info = vfio_user_device_io_get_region_info,
     .get_irq_info = vfio_user_device_io_get_irq_info,
     .set_irqs = vfio_user_device_io_set_irqs,
     .region_read = vfio_user_device_io_region_read,
     .region_write = vfio_user_device_io_region_write,
-
+    .mig_data_read = vfio_user_device_io_mig_data_read,
+    .get_precopy_info = vfio_user_device_io_get_precopy_info,
 };

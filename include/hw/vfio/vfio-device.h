@@ -257,6 +257,8 @@ struct VFIODeviceIOOps {
     int (*region_read)(VFIODevice *vdev, uint8_t nr, off_t off, uint32_t size,
                        void *data);
 
+    ssize_t (*mig_data_read)(VFIODevice *vdev, void *buf, size_t buf_size);
+
     /**
      * @region_write
      *

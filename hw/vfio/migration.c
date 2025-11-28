@@ -348,11 +348,12 @@ static int vfio_query_precopy_size(VFIODevice *vbasedev)
 }
 
 /* Returns the size of saved data on success and -errno on error */
-static ssize_t vfio_save_block(QEMUFile *f, VFIOMigration *migration)
+static ssize_t vfio_save_block(QEMUFile *f, VFIODevice *vbasedev)
 {
+    VFIOMigration *migration = vbasedev->migration;
     ssize_t data_size;
 
-    data_size = read(migration->data_fd, migration->data_buffer,
+    data_size = vbasedev->io_ops->mig_data_read(vbasedev, migration->data_buffer,
                      migration->data_buffer_size);
     if (data_size < 0) {
         /*
@@ -614,7 +615,7 @@ static int vfio_save_iterate(QEMUFile *f, void *opaque)
         migration->event_save_iterate_started = true;
     }
 
-    data_size = vfio_save_block(f, migration);
+    data_size = vfio_save_block(f, vbasedev);
     if (data_size < 0) {
         return data_size;
     }
@@ -658,7 +659,7 @@ static int vfio_save_complete_precopy(QEMUFile *f, void *opaque)
     }
 
     do {
-        data_size = vfio_save_block(f, vbasedev->migration);
+        data_size = vfio_save_block(f, vbasedev);
         if (data_size < 0) {
             return data_size;
         }

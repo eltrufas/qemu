@@ -192,23 +192,35 @@ bool vfio_container_devices_dirty_tracking_is_supported(
 static int vfio_device_dma_logging_report(VFIODevice *vbasedev, hwaddr iova,
                                           hwaddr size, void *bitmap)
 {
-    uint64_t buf[DIV_ROUND_UP(sizeof(struct vfio_device_feature) +
-                        sizeof(struct vfio_device_feature_dma_logging_report),
-                        sizeof(uint64_t))] = {};
-    struct vfio_device_feature *feature = (struct vfio_device_feature *)buf;
-    struct vfio_device_feature_dma_logging_report *report =
-        (struct vfio_device_feature_dma_logging_report *)feature->data;
+    size_t bitmap_size;
+    struct vfio_device_feature *feature;
+    struct vfio_device_feature_dma_logging_report *report;
+    int ret;
+
+    bitmap_size = vfio_dirty_bitmap_size(size);
+
+    feature = g_malloc0(sizeof(*feature) + sizeof(*report) + bitmap_size);
+
+    feature->argsz = sizeof(*feature) + sizeof(*report) + bitmap_size;
+    feature->flags = VFIO_DEVICE_FEATURE_GET |
+                     VFIO_DEVICE_FEATURE_DMA_LOGGING_REPORT;
+
+    report = (struct vfio_device_feature_dma_logging_report *)feature->data;
 
     report->iova = iova;
     report->length = size;
     report->page_size = qemu_real_host_page_size();
-    report->bitmap = (uintptr_t)bitmap;
 
-    feature->argsz = sizeof(buf);
-    feature->flags = VFIO_DEVICE_FEATURE_GET |
-                     VFIO_DEVICE_FEATURE_DMA_LOGGING_REPORT;
+    ret = vbasedev->io_ops->device_feature(vbasedev, feature);
+    if (ret) {
+        goto out;
+    }
 
-    return vbasedev->io_ops->device_feature(vbasedev, feature);
+    memcpy(bitmap, (char *)report + sizeof(*report), bitmap_size);
+
+out:
+    g_free(feature);
+    return ret;
 }
 
 static int vfio_container_iommu_query_dirty_bitmap(

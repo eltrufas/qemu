@@ -220,6 +220,8 @@ void vfio_pci_intx_set_handler(VFIOPCIDevice *vdev, bool enable);
 void vfio_pci_msix_set_notifiers(VFIOPCIDevice *vdev);
 void vfio_pci_msi_set_handler(VFIOPCIDevice *vdev, int nr, bool enable);
 
+int vfio_pci_save_config(VFIODevice *vbasedev, QEMUFile *f, Error **errp);
+int vfio_pci_load_config(VFIODevice *vbasedev, QEMUFile *f);
 uint32_t vfio_pci_read_config(PCIDevice *pdev, uint32_t addr, int len);
 void vfio_pci_write_config(PCIDevice *pdev,
                            uint32_t addr, uint32_t val, int len);

@@ -13,6 +13,7 @@
 
 #include "hw/qdev-properties.h"
 #include "hw/vfio/pci.h"
+#include "hw/vfio/vfio-migration-internal.h"
 #include "hw/vfio-user/device.h"
 #include "hw/vfio-user/proxy.h"
 
@@ -226,8 +227,8 @@ static VFIODeviceOps vfio_user_pci_ops = {
     .vfio_eoi = vfio_pci_intx_eoi,
     .vfio_get_object = vfio_user_pci_get_object,
     /* No live migration support yet. */
-    .vfio_save_config = NULL,
-    .vfio_load_config = NULL,
+    .vfio_save_config = vfio_pci_save_config,
+    .vfio_load_config = vfio_pci_load_config,
 };
 
 static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
@@ -329,6 +330,12 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
 
     if (!vfio_pci_interrupt_setup(vdev, errp)) {
         goto out_teardown;
+    }
+
+    if (!pdev->failover_pair_id) {
+        if (!vfio_migration_realize(vbasedev, errp)) {
+            goto out_teardown;
+        }
     }
 
     vfio_pci_register_err_notifier(vdev);

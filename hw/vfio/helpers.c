@@ -41,6 +41,12 @@ int vfio_bitmap_alloc(VFIOBitmap *vbmap, hwaddr size)
     return 0;
 }
 
+size_t vfio_dirty_bitmap_size(hwaddr size)
+{
+    hwaddr pages = REAL_HOST_PAGE_ALIGN(size) / qemu_real_host_page_size();
+    return ROUND_UP(pages, sizeof(uint64_t) * BITS_PER_BYTE) / BITS_PER_BYTE;
+}
+
 struct vfio_info_cap_header *
 vfio_get_cap(void *ptr, uint32_t cap_offset, uint16_t id)
 {
