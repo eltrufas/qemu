@@ -13,7 +13,6 @@
 #include "qemu/units.h"
 #include "qemu/error-report.h"
 #include <linux/vfio.h>
-#include <sys/ioctl.h>
 
 #include "system/runstate.h"
 #include "hw/vfio/vfio-device.h"
@@ -133,7 +132,7 @@ int vfio_migration_set_state(VFIODevice *vbasedev,
     struct vfio_device_feature *feature = (struct vfio_device_feature *)buf;
     struct vfio_device_feature_mig_state *mig_state =
         (struct vfio_device_feature_mig_state *)feature->data;
-    int ret;
+    int ret, reset_ret;
     g_autofree char *error_prefix =
         g_strdup_printf("%s: Failed setting device state to %s.",
                         vbasedev->name, mig_state_to_str(new_state));
@@ -149,10 +148,9 @@ int vfio_migration_set_state(VFIODevice *vbasedev,
     feature->flags =
         VFIO_DEVICE_FEATURE_SET | VFIO_DEVICE_FEATURE_MIG_DEVICE_STATE;
     mig_state->device_state = new_state;
-    if (ioctl(vbasedev->fd, VFIO_DEVICE_FEATURE, feature)) {
+    ret = vbasedev->io_ops->device_feature(vbasedev, feature);
+    if (ret) {
         /* Try to set the device in some good state */
-        ret = -errno;
-
         if (recover_state == VFIO_DEVICE_STATE_ERROR) {
             error_setg_errno(errp, errno,
                              "%s Recover state is ERROR. Resetting device",
@@ -166,8 +164,8 @@ int vfio_migration_set_state(VFIODevice *vbasedev,
                          error_prefix, mig_state_to_str(recover_state));
 
         mig_state->device_state = recover_state;
-        if (ioctl(vbasedev->fd, VFIO_DEVICE_FEATURE, feature)) {
-            ret = -errno;
+        ret = vbasedev->io_ops->device_feature(vbasedev, feature);
+        if (ret) {
             /*
              * If setting the device in recover state fails, report
              * the error here and propagate the first error.
@@ -203,9 +201,10 @@ int vfio_migration_set_state(VFIODevice *vbasedev,
     return 0;
 
 reset_device:
-    if (ioctl(vbasedev->fd, VFIO_DEVICE_RESET)) {
+    reset_ret = vbasedev->io_ops->device_reset(vbasedev);
+    if (reset_ret) {
         hw_error("%s: Failed resetting device, err: %s", vbasedev->name,
-                 strerror(errno));
+                 strerror(-reset_ret));
     }
 
     vfio_migration_set_device_state(vbasedev, VFIO_DEVICE_STATE_RUNNING);
@@ -310,13 +309,15 @@ static int vfio_query_stop_copy_size(VFIODevice *vbasedev,
     struct vfio_device_feature *feature = (struct vfio_device_feature *)buf;
     struct vfio_device_feature_mig_data_size *mig_data_size =
         (struct vfio_device_feature_mig_data_size *)feature->data;
+    int ret;
 
     feature->argsz = sizeof(buf);
     feature->flags =
         VFIO_DEVICE_FEATURE_GET | VFIO_DEVICE_FEATURE_MIG_DATA_SIZE;
 
-    if (ioctl(vbasedev->fd, VFIO_DEVICE_FEATURE, feature)) {
-        return -errno;
+    ret = vbasedev->io_ops->device_feature(vbasedev, feature);
+    if (ret) {
+        return ret;
     }
 
     *stop_copy_size = mig_data_size->stop_copy_length;
@@ -324,17 +325,20 @@ static int vfio_query_stop_copy_size(VFIODevice *vbasedev,
     return 0;
 }
 
-static int vfio_query_precopy_size(VFIOMigration *migration)
+static int vfio_query_precopy_size(VFIODevice *vbasedev)
 {
+    VFIOMigration *migration = vbasedev->migration;
     struct vfio_precopy_info precopy = {
         .argsz = sizeof(precopy),
     };
+    int ret;
 
     migration->precopy_init_size = 0;
     migration->precopy_dirty_size = 0;
 
-    if (ioctl(migration->data_fd, VFIO_MIG_GET_PRECOPY_INFO, &precopy)) {
-        return -errno;
+    ret = vbasedev->io_ops->get_precopy_info(vbasedev, &precopy);
+    if (ret) {
+        return ret;
     }
 
     migration->precopy_init_size = precopy.initial_bytes;
@@ -481,7 +485,7 @@ static int vfio_save_setup(QEMUFile *f, void *opaque, Error **errp)
                 return ret;
             }
 
-            vfio_query_precopy_size(migration);
+            vfio_query_precopy_size(vbasedev);
 
             break;
         case VFIO_DEVICE_STATE_STOP:
@@ -578,7 +582,7 @@ static void vfio_state_pending_exact(void *opaque, uint64_t *must_precopy,
     *must_precopy += stop_copy_size;
 
     if (vfio_device_state_is_precopy(vbasedev)) {
-        vfio_query_precopy_size(migration);
+        vfio_query_precopy_size(vbasedev);
     }
 
     trace_vfio_state_pending_exact(vbasedev->name, *must_precopy, *can_postcopy,
@@ -946,11 +950,13 @@ static int vfio_migration_query_flags(VFIODevice *vbasedev, uint64_t *mig_flags)
     struct vfio_device_feature *feature = (struct vfio_device_feature *)buf;
     struct vfio_device_feature_migration *mig =
         (struct vfio_device_feature_migration *)feature->data;
+    int ret;
 
     feature->argsz = sizeof(buf);
     feature->flags = VFIO_DEVICE_FEATURE_GET | VFIO_DEVICE_FEATURE_MIGRATION;
-    if (ioctl(vbasedev->fd, VFIO_DEVICE_FEATURE, feature)) {
-        return -errno;
+    ret = vbasedev->io_ops->device_feature(vbasedev, feature);
+    if (ret) {
+        return ret;
     }
 
     *mig_flags = mig->flags;
@@ -968,7 +974,7 @@ static bool vfio_dma_logging_supported(VFIODevice *vbasedev)
     feature->flags = VFIO_DEVICE_FEATURE_PROBE |
                      VFIO_DEVICE_FEATURE_DMA_LOGGING_START;
 
-    return !ioctl(vbasedev->fd, VFIO_DEVICE_FEATURE, feature);
+    return !vbasedev->io_ops->device_feature(vbasedev, feature);
 }
 
 static int vfio_migration_init(VFIODevice *vbasedev)

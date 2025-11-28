@@ -169,6 +169,29 @@ extern VFIODeviceList vfio_device_list;
  */
 struct VFIODeviceIOOps {
     /**
+     * @device_reset
+     *
+     * Perform a PCI device reset.
+     *
+     * @vdev: #VFIODevice to use
+     *
+     * Returns 0 on success or -errno.
+     */
+    int (*device_reset)(VFIODevice *vdev);
+
+    /**
+     * @get_precopy_info
+     *
+     * Get information about migration data transfer progress.
+     *
+     * @vdev: #VFIODevice to use
+     * @info: precopy information to fill in
+     *
+     * Returns 0 on success or -errno.
+     */
+    int (*get_precopy_info)(VFIODevice *vdev, struct vfio_precopy_info *info);
+
+    /**
      * @device_feature
      *
      * Fill in feature info for the given device.

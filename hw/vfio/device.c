@@ -32,6 +32,7 @@
 #include "migration/blocker.h"
 #include "monitor/monitor.h"
 #include "vfio-helpers.h"
+#include "vfio-migration-internal.h"
 
 VFIODeviceList vfio_device_list =
     QLIST_HEAD_INITIALIZER(vfio_device_list);
@@ -519,6 +520,15 @@ void vfio_device_unprepare(VFIODevice *vbasedev)
  * Traditional ioctl() based io
  */
 
+static int vfio_device_io_device_reset(VFIODevice *vbasedev)
+{
+    int ret;
+
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_RESET);
+
+    return ret < 0 ? -errno : ret;
+}
+
 static int vfio_device_io_device_feature(VFIODevice *vbasedev,
                                          struct vfio_device_feature *feature)
 {
@@ -595,11 +605,23 @@ static int vfio_device_io_region_write(VFIODevice *vbasedev, uint8_t index,
     return ret < 0 ? -errno : ret;
 }
 
+static int vfio_device_io_get_precopy_info(VFIODevice *vbasedev, struct vfio_precopy_info *info)
+{
+    VFIOMigration *migration = vbasedev->migration;
+    int ret;
+
+    ret = ioctl(migration->data_fd, VFIO_MIG_GET_PRECOPY_INFO, info);
+
+    return ret < 0 ? -errno : ret;
+}
+
 static VFIODeviceIOOps vfio_device_io_ops_ioctl = {
+    .device_reset = vfio_device_io_device_reset,
     .device_feature = vfio_device_io_device_feature,
     .get_region_info = vfio_device_io_get_region_info,
     .get_irq_info = vfio_device_io_get_irq_info,
     .set_irqs = vfio_device_io_set_irqs,
     .region_read = vfio_device_io_region_read,
     .region_write = vfio_device_io_region_write,
+    .get_precopy_info = vfio_device_io_get_precopy_info,
 };
