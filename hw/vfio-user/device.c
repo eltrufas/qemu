@@ -11,6 +11,7 @@
 #include "qemu/error-report.h"
 #include "qemu/lockable.h"
 #include "qemu/thread.h"
+#include "migration/qemu-file.h"
 
 #include "hw/vfio-user/device.h"
 #include "hw/vfio-user/trace.h"
@@ -489,21 +490,63 @@ static ssize_t vfio_user_device_io_mig_data_read(VFIODevice *vbasedev, void *buf
 
     size = sizeof(VFIOUserMigData) + buf_size;
     msgp = g_malloc0(size);
-    vfio_user_request_msg(&msgp->hdr, VFIO_USER_MIG_DATA_READ, size, 0);
+
+    vfio_user_request_msg(&msgp->hdr, VFIO_USER_MIG_DATA_READ, sizeof(VFIOUserMigData), 0);
     msgp->argsz = size - sizeof(VFIOUserHdr);
     msgp->size = buf_size;
 
-    if (!vfio_user_send_wait(proxy, &msgp->hdr, NULL, 0, &local_err)) {
+    if (!vfio_user_send_wait(proxy, &msgp->hdr, NULL, size, &local_err)) {
         error_prepend(&local_err, "%s: ", __func__);
         error_report_err(local_err);
         return -EFAULT;
     }
     
     if (msgp->hdr.flags & VFIO_USER_ERROR) {
-        return -msgp->hdr.error_reply;
+        return -((ssize_t)msgp->hdr.error_reply);
     }
 
+    if (msgp->size > buf_size) {
+        error_report("%s: server returned more data than requested", __func__);
+        return -EINVAL;
+    }
+
+    trace_vfio_user_mig_data_read(msgp->size);
+
     memcpy(buf, msgp->data, msgp->size);
+
+    return msgp->size;
+}
+
+static int vfio_user_device_io_mig_data_write(VFIODevice *vbasedev, QEMUFile *f, size_t data_size)
+{
+    g_autofree VFIOUserMigData *msgp = NULL;
+    VFIOUserProxy *proxy = vbasedev->proxy;
+    Error *local_err = NULL;
+    uint32_t size;
+    int ret;
+
+
+    size = sizeof(VFIOUserMigData) + data_size;
+    msgp = g_malloc0(size);
+
+    vfio_user_request_msg(&msgp->hdr, VFIO_USER_MIG_DATA_WRITE, size, 0);
+    msgp->argsz = size - sizeof(VFIOUserHdr);
+    msgp->size = data_size;
+
+    ret = qemu_get_buffer(f, msgp->data, data_size);
+    if (ret < 0) {
+        return ret;
+    }
+
+    if (!vfio_user_send_wait(proxy, &msgp->hdr, NULL, size, &local_err)) {
+        error_prepend(&local_err, "%s: ", __func__);
+        error_report_err(local_err);
+        return -EFAULT;
+    }
+    
+    if (msgp->hdr.flags & VFIO_USER_ERROR) {
+        return -((ssize_t)msgp->hdr.error_reply);
+    }
 
     return msgp->size;
 }
@@ -548,5 +591,6 @@ VFIODeviceIOOps vfio_user_device_io_ops_sock = {
     .region_read = vfio_user_device_io_region_read,
     .region_write = vfio_user_device_io_region_write,
     .mig_data_read = vfio_user_device_io_mig_data_read,
+    .mig_data_write = vfio_user_device_io_mig_data_write,
     .get_precopy_info = vfio_user_device_io_get_precopy_info,
 };

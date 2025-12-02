@@ -254,7 +254,7 @@ typedef struct {
     VFIOUserHdr hdr;
     uint32_t argsz;
     uint32_t size;
-    char data[];
+    uint8_t data[];
 } VFIOUserMigData;
 
 typedef struct {

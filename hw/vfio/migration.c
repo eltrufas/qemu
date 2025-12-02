@@ -232,7 +232,7 @@ static int vfio_load_buffer(QEMUFile *f, VFIODevice *vbasedev,
     VFIOMigration *migration = vbasedev->migration;
     int ret;
 
-    ret = qemu_file_get_to_fd(f, migration->data_fd, data_size);
+    ret = vbasedev->io_ops->mig_data_write(vbasedev, f, data_size);
     trace_vfio_load_state_device_data(vbasedev->name, data_size, ret);
 
     return ret;

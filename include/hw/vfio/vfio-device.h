@@ -259,6 +259,8 @@ struct VFIODeviceIOOps {
 
     ssize_t (*mig_data_read)(VFIODevice *vdev, void *buf, size_t buf_size);
 
+    int (*mig_data_write)(VFIODevice *vdev, QEMUFile *f, size_t data_size);
+
     /**
      * @region_write
      *

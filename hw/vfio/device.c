@@ -30,6 +30,7 @@
 #include "qemu/units.h"
 #include "migration/cpr.h"
 #include "migration/blocker.h"
+#include "migration/qemu-file.h"
 #include "monitor/monitor.h"
 #include "vfio-helpers.h"
 #include "vfio-migration-internal.h"
@@ -610,6 +611,11 @@ static ssize_t vfio_device_io_mig_data_read(VFIODevice *vbasedev, void *buf, siz
     return read(migration->data_fd, buf, buf_size);
 }
 
+static int vfio_device_io_mig_data_write(VFIODevice *vbasedev, QEMUFile *f, uint64_t data_size) {
+    VFIOMigration *migration = vbasedev->migration;
+    return qemu_file_get_to_fd(f, migration->data_fd, data_size);
+}
+
 static int vfio_device_io_get_precopy_info(VFIODevice *vbasedev, struct vfio_precopy_info *info)
 {
     VFIOMigration *migration = vbasedev->migration;
@@ -629,5 +635,6 @@ static VFIODeviceIOOps vfio_device_io_ops_ioctl = {
     .region_read = vfio_device_io_region_read,
     .region_write = vfio_device_io_region_write,
     .mig_data_read = vfio_device_io_mig_data_read,
+    .mig_data_write = vfio_device_io_mig_data_write,
     .get_precopy_info = vfio_device_io_get_precopy_info,
 };
